@@ -113,6 +113,7 @@ if __name__ == '__main__':
     g.add_argument('--random_state', '-r', type=int_or_none, default='none', help='random seed (none=random)')
     g.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
     g.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
+    g.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
 
     args = p.parse_args()
 
