@@ -43,7 +43,7 @@ def parse_table_and_classes(table, klasses_fn):
 
 def create_rfc(otu_table, klasses_fn, **rfc_args):
     '''initialize rfc from otu table and class file'''
-    
+
     table, klasses = parse_table_and_classes(otu_table, klasses_fn)
 
     rfc = RFC(**rfc_args)
@@ -51,6 +51,7 @@ def create_rfc(otu_table, klasses_fn, **rfc_args):
     rfc.true_klasses = klasses
     rfc.predicted_klasses = rfc.predict(table)
     rfc.total_score = rfc.score(table, klasses)
+    rfc.feature_names = list(table.columns.values)
 
     return rfc
 
@@ -77,7 +78,8 @@ def save_results(rfc, tag):
         f.write('\n'.join(rfc.predicted_klasses) + '\n')
 
     with open(tagged_name('featimp', tag), 'w') as f:
-        f.write('\n'.join([str(x) for x in rfc.feature_importances_]) + '\n')
+        o = sorted(zip(rfc.feature_names, rfc.feature_importances_), key=lambda x: -x[1])
+        f.write('\n'.join(["{}\t{}".format(*l) for l in o]) + '\n')
 
     with open(tagged_name('scores', tag), 'w') as f:
         f.write("mean score: {}".format(rfc.total_score) + '\n')
@@ -123,6 +125,7 @@ if __name__ == '__main__':
     g.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
     g.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
     g.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
+    g.add_argument('--verbose', '-v', action='count')
 
     args = p.parse_args()
 
