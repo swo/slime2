@@ -22,7 +22,7 @@
     swo@mit.edu
 '''
 
-import argparse, cPickle as pickle, hashlib, sys
+import argparse, cPickle as pickle, hashlib, sys, time
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier as RFC
 
@@ -80,6 +80,7 @@ def create_rfc(otu_table, klasses_fn, **rfc_args):
     rfc.predicted_klasses = rfc.predict(table)
     rfc.total_score = rfc.score(table, klasses)
     rfc.feature_names = list(table.columns.values)
+    rfc.ordered_features = sorted(zip(rfc.feature_names, rfc.feature_importances_), key=lambda x: -x[1])
 
     return rfc
 
@@ -106,8 +107,10 @@ def save_results(rfc, tag):
         f.write('\n'.join(rfc.predicted_klasses) + '\n')
 
     with open(tagged_name('featimp', tag), 'w') as f:
-        o = sorted(zip(rfc.feature_names, rfc.feature_importances_), key=lambda x: -x[1])
-        f.write('\n'.join(["{}\t{}".format(*l) for l in o]) + '\n')
+        cumul_imp = 0
+        for of in rfc.ordered_features:
+            cumul_imp += float(of[1])
+            f.write("{}\t{}\t{:.3f}\n".format(of[0], of[1], cumul_imp))
 
     with open(tagged_name('scores', tag), 'w') as f:
         f.write("mean score: {}".format(rfc.total_score) + '\n')
@@ -168,6 +171,18 @@ if __name__ == '__main__':
     for a in ['otu_table', 'classes', 'output_tag']:
         del rfc_args[a]
 
+    start_time = time.time()
     rfc = create_rfc(args.otu_table, args.classes, **rfc_args)
     save_results(rfc, tag)
+    end_time = time.time()
     print "saved results with tag {}".format(tag)
+
+    if args.verbose > 0:
+        print "walltime elapsed: {:.1f} seconds".format(end_time - start_time)
+
+        if hasattr(rfc, 'oob_score_'):
+            print "oob score: {:.5f}".format(rfc.oob_score_)
+
+        print "top features:"
+        for i in range(10):
+            print "  {}\t{}".format(*rfc.ordered_features[i])
