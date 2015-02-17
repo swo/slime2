@@ -33,9 +33,18 @@ def hash_tag(fns, tag_length=6):
     m.update(''.join([open(fn).read() for fn in fns]))
     return m.hexdigest()[0: tag_length]
 
+def parse_table_and_classes(table, klasses_fn):
+    '''transpose the table and keep only the columns with classes'''
+
+    samples, klasses = zip(*[line.split() for line in open(klasses_fn)])
+    table = pd.read_table(table, index_col=0).transpose().loc[list(samples)]
+
+    return table, klasses
+
 def create_rfc(otu_table, klasses_fn, **rfc_args):
-    table = pd.io.parsers.read_table(otu_table)
-    klasses = [line.rstrip() for line in open(klasses_fn).readlines()]
+    '''initialize rfc from otu table and class file'''
+    
+    table, klasses = parse_table_and_classes(otu_table, klasses_fn)
 
     rfc = RFC(**rfc_args)
     rfc.fit(table, klasses)
@@ -103,8 +112,8 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description="slime2", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     g = p.add_argument_group('io')
     g.add_argument('otu_table')
-    g.add_argument('classes', help='newline-separated list of target classes')
-    g.add_argument('--output_tag', '-o', default=None)
+    g.add_argument('classes', help='newline-separated list of sample-tab-class')
+    g.add_argument('--output_tag', '-o', default=None, help='tag for output data (default: use a hash tag)')
 
     g = p.add_argument_group('tree details')
     g.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
