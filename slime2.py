@@ -36,7 +36,35 @@ def hash_tag(fns, tag_length=6):
 def parse_table_and_classes(table, klasses_fn):
     '''transpose the table and keep only the columns with classes'''
 
-    samples, klasses = zip(*[line.split() for line in open(klasses_fn)])
+    # if the classes file starts with a one-field line, then it's in a compressed
+    # format
+    with open(klasses_fn) as f:
+        lines = [l.rstrip() for l in f]
+
+    n_fields = len(lines[0].split())
+
+    if n_fields == 1:
+        samples = []
+        klasses = []
+
+        read_class = True
+        for line in lines:
+            if line.startswith("#"):
+                continue
+            elif line == "":
+                read_class = True
+            elif read_class:
+                klass = line
+                read_class = False
+            else:
+                sample = line
+                samples.append(sample)
+                klasses.append(klass)
+    elif n_fields == 2:
+        samples, klasses = zip(*lines)
+    else:
+        raise RuntimeError("got {} fields in classes file".format(n_fields))
+
     table = pd.read_table(table, index_col=0).transpose().loc[list(samples)]
 
     return table, klasses
