@@ -22,15 +22,15 @@
     swo@mit.edu
 '''
 
-import argparse, cPickle as pickle, hashlib, sys, time
+import argparse, cPickle as pickle, hashlib, sys, time, random
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier as RFC
 
-def hash_tag(fns, tag_length=6):
+def hash_tag(strs, tag_length=6):
     '''create a short tag using md5'''
 
     m = hashlib.md5()
-    m.update(''.join([open(fn).read() for fn in fns]))
+    m.update(''.join([s for s in strs]))
     return m.hexdigest()[0: tag_length]
 
 def parse_table_and_classes(table, klasses_fn):
@@ -69,10 +69,8 @@ def parse_table_and_classes(table, klasses_fn):
 
     return table, klasses
 
-def create_rfc(otu_table, klasses_fn, **rfc_args):
+def create_rfc(otu_table, klasses, **rfc_args):
     '''initialize rfc from otu table and class file'''
-
-    table, klasses = parse_table_and_classes(otu_table, klasses_fn)
 
     rfc = RFC(**rfc_args)
     rfc.fit(table, klasses)
@@ -100,7 +98,7 @@ def categorize_classifications(targets, predictions):
 def save_results(rfc, tag):
     # pickle the whole rfc
     with open(tagged_name('rfc', tag, suffix='pkl'), 'w') as f:
-        pickle.dump(rfc, f)
+        pickle.dump(rfc, f, protocol=2)
 
     # save the other information in text files
     with open(tagged_name('classes', tag), 'w') as f:
@@ -147,6 +145,8 @@ if __name__ == '__main__':
     g.add_argument('otu_table')
     g.add_argument('classes', help='newline-separated list of sample-tab-class')
     g.add_argument('--output_tag', '-o', default=None, help='tag for output data (default: use a hash tag)')
+    g.add_argument('--rfc', '-c', default=None, help='use an existing classifier?')
+    g.add_argument('--shuffle', action='store_true', help='shuffle class labels?')
 
     g = p.add_argument_group('tree details')
     g.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
@@ -160,29 +160,49 @@ if __name__ == '__main__':
 
     args = p.parse_args()
 
-    tag = hash_tag([args.otu_table, args.classes])
+    tag = hash_tag([open(args.otu_table).read(), open(args.classes).read()])
 
     # save the command line
     with open(tagged_name('cmd', tag), 'w') as f:
         f.write(' '.join(sys.argv) + '\n')
 
-    # prepare the arguments for the random forest instantiation
-    rfc_args = dict(vars(args))
-    for a in ['otu_table', 'classes', 'output_tag']:
-        del rfc_args[a]
+    table, klasses = parse_table_and_classes(args.otu_table, args.classes)
 
-    start_time = time.time()
-    rfc = create_rfc(args.otu_table, args.classes, **rfc_args)
-    save_results(rfc, tag)
-    end_time = time.time()
-    print "saved results with tag {}".format(tag)
+    if args.shuffle:
+        random.shuffle(klasses)
 
-    if args.verbose > 0:
-        print "walltime elapsed: {:.1f} seconds".format(end_time - start_time)
+    if args.rfc is None:
+        # prepare the arguments for the random forest instantiation
+        rfc_args = dict(vars(args))
+        for a in ['otu_table', 'classes', 'output_tag', 'rfc', 'shuffle']:
+            del rfc_args[a]
 
-        if hasattr(rfc, 'oob_score_'):
-            print "oob score: {:.5f}".format(rfc.oob_score_)
+        start_time = time.time()
+        rfc = create_rfc(table, klasses, **rfc_args)
 
-        print "top features:"
-        for i in range(10):
-            print "  {}\t{}".format(*rfc.ordered_features[i])
+        if not args.shuffle:
+            save_results(rfc, tag)
+            print "saved results with tag {}".format(tag)
+
+        end_time = time.time()
+
+        if args.verbose > 0:
+            print "walltime elapsed: {:.1f} seconds".format(end_time - start_time)
+
+            if hasattr(rfc, 'oob_score_'):
+                print "oob score: {:.5f}".format(rfc.oob_score_)
+
+            print "top features:"
+            for i in range(10):
+                print "  {}\t{}".format(*rfc.ordered_features[i])
+    else:
+        with open(args.rfc) as f:
+            rfc = pickle.load(f)
+
+        # run this rfc with the new table and classes
+        predicted_klasses = rfc.predict(table)
+
+        for x in categorize_classifications(klasses, predicted_klasses):
+            print x
+
+        print "score: {}".format(rfc.score(table, klasses))
