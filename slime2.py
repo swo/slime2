@@ -22,8 +22,8 @@
     swo@mit.edu
 '''
 
-import argparse, cPickle as pickle, hashlib, sys, time, random
-import pandas as pd
+import argparse, cPickle as pickle, hashlib, sys, time, random, itertools
+import pandas as pd, numpy as np
 from sklearn.ensemble import RandomForestClassifier as RFC
 
 def hash_tag(strs, tag_length=6):
@@ -69,11 +69,11 @@ def parse_table_and_classes(table, klasses_fn):
 
     return table, klasses
 
-def create_rfc(otu_table, klasses, **rfc_args):
+def create_rfc(otu_table, klasses, sample_weights=None, **rfc_args):
     '''initialize rfc from otu table and class file'''
 
     rfc = RFC(**rfc_args)
-    rfc.fit(table, klasses)
+    rfc.fit(table, klasses, sample_weights)
     rfc.true_klasses = klasses
     rfc.predicted_klasses = rfc.predict(table)
     rfc.total_score = rfc.score(table, klasses)
@@ -138,6 +138,14 @@ def int_float_str(x):
         except ValueError, e:
             return x
 
+def assign_weights(weights_string, klasses):
+    weight_vals = [float(x) for x in weights_string.split(",")]
+    chunked_klasses = [g[0] for g in itertools.groupby(klasses)]
+    weight_map = {k: w for w, k in zip(weight_vals, chunked_klasses)}
+
+    weights = np.array([weight_map[k] for k in klasses])
+    return weights
+
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description="slime2", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -147,6 +155,7 @@ if __name__ == '__main__':
     g.add_argument('--output_tag', '-o', default=None, help='tag for output data (default: use a hash tag)')
     g.add_argument('--rfc', '-c', default=None, help='use an existing classifier?')
     g.add_argument('--shuffle', action='store_true', help='shuffle class labels?')
+    g.add_argument('--weights', help='set of floats, comma separated')
 
     g = p.add_argument_group('tree details')
     g.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
@@ -168,17 +177,22 @@ if __name__ == '__main__':
 
     table, klasses = parse_table_and_classes(args.otu_table, args.classes)
 
+    if args.weights:
+        sample_weights = assign_weights(args.weights, klasses)
+    else:
+        sample_weights = None
+
     if args.shuffle:
         random.shuffle(klasses)
 
     if args.rfc is None:
         # prepare the arguments for the random forest instantiation
         rfc_args = dict(vars(args))
-        for a in ['otu_table', 'classes', 'output_tag', 'rfc', 'shuffle']:
+        for a in ['otu_table', 'classes', 'output_tag', 'rfc', 'shuffle', 'weights']:
             del rfc_args[a]
 
         start_time = time.time()
-        rfc = create_rfc(table, klasses, **rfc_args)
+        rfc = create_rfc(table, klasses, sample_weights, **rfc_args)
 
         if not args.shuffle:
             save_results(rfc, tag)
