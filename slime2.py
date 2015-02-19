@@ -39,7 +39,7 @@ def parse_table_and_classes(table, klasses_fn):
     # if the classes file starts with a one-field line, then it's in a compressed
     # format
     with open(klasses_fn) as f:
-        lines = [l.rstrip() for l in f]
+        lines = [l.rstrip() for l in f if not l.startswith("#")]
 
     n_fields = len(lines[0].split())
 
@@ -156,7 +156,7 @@ if __name__ == '__main__':
     g.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
     g.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
     g.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
-    g.add_argument('--verbose', '-v', action='count')
+    g.add_argument('--verbose', '-v', action='count', help="verbosity for the random forest creation and stdout summary")
 
     args = p.parse_args()
 
