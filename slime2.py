@@ -65,9 +65,17 @@ def parse_table_and_classes(table, klasses_fn):
     else:
         raise RuntimeError("got {} fields in classes file".format(n_fields))
 
-    table = pd.read_table(table, index_col=0).transpose().loc[list(samples)]
+    raw_table = pd.read_table(table, index_col=0).transpose()
 
-    return table, klasses
+    # check to see that all the samples are columns
+    cols = list(raw_table.index.values)
+    missing_cols = [s for s in samples if s not in cols]
+    if len(missing_cols) > 0:
+        raise RuntimeError("samples {} not a column in table, which has columns {}".format(missing_cols, cols))
+
+    trim_table = raw_table.loc[list(samples)]
+
+    return trim_table, klasses
 
 def create_rfc(otu_table, klasses, sample_weights=None, **rfc_args):
     '''initialize rfc from otu table and class file'''
