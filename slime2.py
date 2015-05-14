@@ -22,9 +22,15 @@
     swo@mit.edu
 '''
 
-import argparse, cPickle as pickle, hashlib, sys, time, random, itertools
+import argparse, hashlib, sys, time, random, itertools
 import pandas as pd, numpy as np
 from sklearn.ensemble import RandomForestClassifier as RFC
+
+# import pickle with backwards compatibility
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 
 def hash_tag(strs, tag_length=6):
     '''create a short tag using md5'''
@@ -156,7 +162,7 @@ def save_results(rfc, tag):
 
     # pickle the whole rfc
     with open(tagged_name('rfc', tag, suffix='pkl'), 'w') as f:
-        pickle.dump(rfc, f, protocol=2)
+        pickle.dump(rfc, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # save the other information in text files
     with open(tagged_name('classes', tag), 'w') as f:
@@ -200,10 +206,10 @@ def int_float_str(x):
     assert(isinstance(x, str))
     try:
         return int(x)
-    except ValueError, e:
+    except ValueError:
         try:
             return float(x)
-        except ValueError, e:
+        except ValueError:
             return x
 
 def assign_weights(weights_string, klasses):
@@ -264,19 +270,19 @@ if __name__ == '__main__':
 
         if not args.shuffle:
             save_results(rfc, tag)
-            print "saved results with tag {}".format(tag)
+            print("saved results with tag {}".format(tag))
 
         end_time = time.time()
 
         if args.verbose > 0:
-            print "walltime elapsed: {:.1f} seconds".format(end_time - start_time)
+            print("walltime elapsed: {:.1f} seconds".format(end_time - start_time))
 
             if hasattr(rfc, 'oob_score_'):
-                print "oob score: {:.5f}".format(rfc.oob_score_)
+                print("oob score: {:.5f}".format(rfc.oob_score_))
 
-            print "top features:"
+            print("top features:")
             for i in range(10):
-                print "  {}\t{}".format(*rfc.ordered_features[i])
+                print("  {}\t{}".format(*rfc.ordered_features[i]))
     else:
         with open(args.rfc) as f:
             rfc = pickle.load(f)
@@ -285,6 +291,6 @@ if __name__ == '__main__':
         predicted_klasses = rfc.predict(table)
 
         for x in categorize_classifications(klasses, predicted_klasses):
-            print x
+            print(x)
 
-        print "score: {}".format(rfc.score(table, klasses))
+        print("score: {}".format(rfc.score(table, klasses)))
