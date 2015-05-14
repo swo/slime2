@@ -34,54 +34,92 @@ def hash_tag(strs, tag_length=6):
     return m.hexdigest()[0: tag_length]
 
 def parse_table_and_classes(table, klasses_fn):
-    '''transpose the table and keep only the columns with classes'''
+    '''
+    read an OTU table and a file that specifies the classes for each sample.
 
-    # if the classes file starts with a one-field line, then it's in a compressed
-    # format
+    the table has qiime format (rows=otus, columns=samples).
+    the classes file can take one of two formats: one-column or two-column.
+
+    returns : (trimmed_table, classes)
+        trimmed_table : pandas dataframe, with the samples without specified classes
+            being dropped
+        classes : list of classes in the same order as the indices in the dataframe
+    '''
+
+    # read in the classes files
     with open(klasses_fn) as f:
         lines = [l.rstrip() for l in f if not l.startswith("#")]
 
+    # figure out how to parse the classes file
     n_fields = len(lines[0].split())
-
     if n_fields == 1:
-        samples = []
-        klasses = []
-
-        read_class = True
-        for line in lines:
-            if line.startswith("#"):
-                continue
-            elif line == "":
-                read_class = True
-            elif read_class:
-                klass = line
-                read_class = False
-            else:
-                sample = line
-                samples.append(sample)
-                klasses.append(klass)
+        samples, klasses = parse_one_column_klasses(lines)
     elif n_fields == 2:
-        samples, klasses = zip(*lines)
+        samples, klasses = parse_two_column_klasses(lines)
     else:
         raise RuntimeError("got {} fields in classes file".format(n_fields))
 
+    # read in the table
     raw_table = pd.read_table(table, index_col=0).transpose()
 
     # check to see that all the samples are columns
+    # complain if the classes file gave a sample not that's not in the OTU table
     cols = list(raw_table.index.values)
     missing_cols = [s for s in samples if s not in cols]
     if len(missing_cols) > 0:
         raise RuntimeError("samples {} not a column in table, which has columns {}".format(missing_cols, cols))
 
+    # only keep samples in the OTU table if they have classes associated with them
     trim_table = raw_table.loc[list(samples)]
 
     return trim_table, klasses
 
+def parse_two_column_klasses(lines):
+    '''
+    two-column files have lines with two tab-separated fields: sample-tab-class.
+    for example, lines would be like sick_guy1 tab sick, healthy_guy1 tab healthy, etc.
+    '''
+
+    samples, klasses = zip(*lines)
+    return samples, klasses
+
+def parse_one_column_klasses(lines, comment="#"):
+    '''
+    one-column files have a header line with the name of the class, then the
+    samples in that class, then a blank line before the next class. for example,
+    lines would be like: sick, sick_guy1, sick_guy2, blank, healthy, healthy_guy1, etc.
+    '''
+
+    samples = []
+    klasses = []
+
+    read_klass = True # flag for asking if the next non-comment line is a class name
+    for line in lines:
+        if line.startswith(comment):
+            # ignore comment lines
+            continue
+        elif line == "":
+            # the next line after a blank is a class name
+            read_klass = True
+        elif read_klass:
+            # the next lines after the class are samples
+            klass = line
+            read_klass = False
+        else:
+            sample = line
+            samples.append(sample)
+            klasses.append(klass)
+
+    return samples, klasses
+
 def create_rfc(otu_table, klasses, sample_weights=None, **rfc_args):
     '''initialize rfc from otu table and class file'''
 
+    # construct the random forest object and fit the data
     rfc = RFC(**rfc_args)
     rfc.fit(table, klasses, sample_weights)
+
+    # attach some extra data to the random forest object for bookkeeping
     rfc.true_klasses = klasses
     rfc.predicted_klasses = rfc.predict(table)
     rfc.total_score = rfc.score(table, klasses)
@@ -91,9 +129,16 @@ def create_rfc(otu_table, klasses, sample_weights=None, **rfc_args):
     return rfc
 
 def tagged_name(fn, tag, suffix='txt'):
+    '''format filenames for rfc output'''
     return "{}_{}.{}".format(tag, fn, suffix)
 
 def categorize_classifications(targets, predictions):
+    '''
+    this is like an explicit confusion matrix. make a line for every sample.
+    if a sample was X and was classified as X, just write "--". if it was X
+    but classified as Y, write ">> X misclassified as Y".
+    '''
+
     out = []
     for t, p in zip(targets, predictions):
         if t == p:
@@ -104,6 +149,11 @@ def categorize_classifications(targets, predictions):
     return out
 
 def save_results(rfc, tag):
+    '''
+    save the results of an rfc run. tag every output filename with a prefix
+    so that they all appear next to each other in the directory.
+    '''
+
     # pickle the whole rfc
     with open(tagged_name('rfc', tag, suffix='pkl'), 'w') as f:
         pickle.dump(rfc, f, protocol=2)
@@ -130,6 +180,11 @@ def save_results(rfc, tag):
         f.write('\n'.join(["{}: {}".format(*x) for x in rfc.get_params().items()]))
 
 def int_or_none(x):
+    '''
+    take a string. if the string is 'none', return None object. if it's
+    an integer, return that integer.
+    '''
+
     assert(isinstance(x, str))
     if x.lower() == 'none':
         return None
@@ -137,6 +192,11 @@ def int_or_none(x):
         return int(x)
 
 def int_float_str(x):
+    '''
+    take a string. if it's an integer, parse it that way. then try for a
+    float. if that fails, just leave it as a string.
+    '''
+
     assert(isinstance(x, str))
     try:
         return int(x)
@@ -159,7 +219,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description="slime2", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     g = p.add_argument_group('io')
     g.add_argument('otu_table')
-    g.add_argument('classes', help='newline-separated list of sample-tab-class')
+    g.add_argument('classes', help='specifications of samples and their true classes')
     g.add_argument('--output_tag', '-o', default=None, help='tag for output data (default: use a hash tag)')
     g.add_argument('--rfc', '-c', default=None, help='use an existing classifier?')
     g.add_argument('--shuffle', action='store_true', help='shuffle class labels?')
