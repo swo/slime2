@@ -1,4 +1,8 @@
 # slime2
+This is a wrapper around SciKit Learn's Random Forest Classifier (rfc) routines. Given an OTU
+table and known classes for some of the samples, train a rfc on all the data and get the
+output: how well could the samples be classified, what's the out-of-bag error, and what are
+the important features?
 
 ### Input
 You'll need an **OTU table** in QIIME format (i.e., OTUs on the rows, samples on the columns). You'll also need a **classes file** that specifies what samples belong to what class.
