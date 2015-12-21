@@ -24,7 +24,7 @@
 
 import argparse, hashlib, sys, time, random, itertools, pickle
 import pandas as pd, numpy as np
-from sklearn.ensemble import RandomForestClassifier as RFC
+import sklearn.ensemble
 
 def hash_tag(strs, tag_length=6):
     '''create a short tag using md5'''
@@ -124,24 +124,29 @@ def parse_one_column_klasses(lines, comment="#"):
 
     return samples, klasses
 
-def create_rfc(otu_table, klasses, sample_weights=None, **rfc_args):
-    '''initialize rfc from otu table and class file'''
 
-    # construct the random forest object and fit the data
-    rfc = RFC(**rfc_args)
-    rfc.fit(table, klasses, sample_weights)
+def create_classifier(constructor, otu_table, klasses, constructor_kwargs, sample_weights=None):
+    '''
+    initialize classifier from otu table and class file
+    
+    clf is the classifier constructor, e.g., sklearn.ensemble.RandomForestClassifier
+    '''
 
-    # attach some extra data to the random forest object for bookkeeping
-    rfc.true_klasses = klasses
-    rfc.predicted_klasses = rfc.predict(table)
-    rfc.total_score = rfc.score(table, klasses)
-    rfc.feature_names = list(table.columns.values)
-    rfc.ordered_features = sorted(zip(rfc.feature_names, rfc.feature_importances_), key=lambda x: -x[1])
+    classifier = constructor(**constructor_kwargs)
+    classifier.fit(table, klasses, sample_weights)
 
-    return rfc
+    # attach some extra data to the object for bookkeeping
+    classifier.true_klasses = klasses
+    classifier.predicted_klasses = classifier.predict(table)
+    classifier.total_score = classifier.score(table, klasses)
+    classifier.feature_names = list(table.columns.values)
+    classifier.ordered_features = sorted(zip(classifier.feature_names, classifier.feature_importances_), key=lambda x: -x[1])
+
+    return classifier
+
 
 def tagged_name(fn, tag, suffix='txt'):
-    '''format filenames for rfc output'''
+    '''format filenames for classifier output'''
     return "{}_{}.{}".format(tag, fn, suffix)
 
 def categorize_classifications(targets, predictions):
@@ -160,36 +165,36 @@ def categorize_classifications(targets, predictions):
 
     return out
 
-def save_results(rfc, tag):
+def save_results(classifier, tag):
     '''
-    save the results of an rfc run. tag every output filename with a prefix
+    save the results of a classifier run. tag every output filename with a prefix
     so that they all appear next to each other in the directory.
     '''
 
-    # pickle the whole rfc
-    with open(tagged_name('rfc', tag, suffix='pkl'), 'wb') as f:
-        pickle.dump(rfc, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # pickle the whole classifier
+    with open(tagged_name('classifier', tag, suffix='pkl'), 'wb') as f:
+        pickle.dump(classifier, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # save the other information in text files
     with open(tagged_name('classes', tag), 'w') as f:
-        f.write('\n'.join(rfc.predicted_klasses) + '\n')
+        f.write('\n'.join(classifier.predicted_klasses) + '\n')
 
     with open(tagged_name('featimp', tag), 'w') as f:
         cumul_imp = 0
-        for of in rfc.ordered_features:
+        for of in classifier.ordered_features:
             cumul_imp += float(of[1])
             f.write("{}\t{}\t{:.3f}\n".format(of[0], of[1], cumul_imp))
 
     with open(tagged_name('scores', tag), 'w') as f:
-        f.write("mean score: {}".format(rfc.total_score) + '\n')
-        if hasattr(rfc, 'oob_score_'):
-            f.write("oob score: {}".format(rfc.oob_score_) + '\n')
+        f.write("mean score: {}".format(classifier.total_score) + '\n')
+        if hasattr(classifier, 'oob_score_'):
+            f.write("oob score: {}".format(classifier.oob_score_) + '\n')
 
     with open(tagged_name('results', tag), 'w') as f:
-        f.write('\n'.join(categorize_classifications(rfc.true_klasses, rfc.predicted_klasses)))
+        f.write('\n'.join(categorize_classifications(classifier.true_klasses, classifier.predicted_klasses)))
 
     with open(tagged_name('params', tag), 'w') as f:
-        f.write('\n'.join(["{}: {}".format(*x) for x in rfc.get_params().items()]))
+        f.write('\n'.join(["{}: {}".format(*x) for x in classifier.get_params().items()]))
 
 def int_or_none(x):
     '''
@@ -233,26 +238,44 @@ if __name__ == '__main__':
     g.add_argument('otu_table')
     g.add_argument('classes', help='specifications of samples and their true classes')
     g.add_argument('--tag', '-t', default=None, help='tag for output data (default: use a hash tag)')
-    g.add_argument('--rfc', '-c', default=None, help='use an existing classifier?')
     g.add_argument('--shuffle', action='store_true', help='shuffle class labels?')
     g.add_argument('--weights', help='set of floats, comma separated')
+    g.add_argument('--quiet', '-q', action='store_true', help='suppress stdout information?')
 
     g = p.add_argument_group('table preprocessing')
     g.add_argument('--normalize', action='store_true', help='normalize table of counts to rel. abunds.?')
     g.add_argument('--logtransform', default=None, type=int, help='log transform? if so, what pseudocount to add?')
 
-    g = p.add_argument_group('tree details')
-    g.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
-    g.add_argument('--criterion', default='gini', choices=['gini', 'entropy'], help='function to measure quality of split')
-    g.add_argument('--max_features', '-f', type=int_float_str, default='auto')
-    g.add_argument('--random_state', '-r', type=int_or_none, default='none', help='random seed (none=random)')
-    g.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
-    g.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
-    g.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
-    g.add_argument('--verbose', '-v', default=0, action='count', help="verbosity for the random forest creation and stdout summary")
+    subparsers = p.add_subparsers(help="choose one classifier")
+    #subparsers.required = True
+
+    sp = subparsers.add_parser("rf", help="random forest")
+    sp.set_defaults(constructor=sklearn.ensemble.RandomForestClassifier)
+    sp.set_defaults(constructor_kwarg_keys=['n_estimators', 'criterion', 'max_features', 'random_state', 'max_depth', 'oob_score', 'n_jobs', 'verbose'])
+    sp.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
+    sp.add_argument('--criterion', default='gini', choices=['gini', 'entropy'], help='function to measure quality of split')
+    sp.add_argument('--max_features', '-f', type=int_float_str, default='auto')
+    sp.add_argument('--random_state', '-r', type=int_or_none, default='none', help='random seed (none=random)')
+    sp.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
+    sp.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
+    sp.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
+    sp.add_argument('--verbose', '-v', action='count', default=0, help='verbose output')
+
+    sp = subparsers.add_parser("ab", help="adaboost")
+    sp.set_defaults(constructor=sklearn.ensemble.AdaBoostClassifier)
+    sp.set_defaults(constructor_kwarg_keys=['n_estimators', 'learning_rate', 'random_state'])
+    sp.add_argument('--n_estimators', '-n', default=50, type=int, help='number of stumps')
+    sp.add_argument('--learning_rate', '-a', default=1.0, type=float, help='shrink contribution of each classifier?')
+    sp.add_argument('--random_state', '-r', type=int_or_none, default='none', help='random seed (none=random)')
+
+    sp = subparsers.add_parser("load", help="load pickled classifier")
+    sp.set_defaults(constructor="load")
+    sp.add_argument('pickled_classifier', type=argparse.FileType('r'))
 
     args = p.parse_args()
 
+    # PREPROCESSING
+    # generate the tag, unless supplied
     if args.tag is None:
         tag = hash_tag([open(args.otu_table).read(), open(args.classes).read()])
     else:
@@ -262,47 +285,47 @@ if __name__ == '__main__':
     with open(tagged_name('cmd', tag), 'w') as f:
         f.write(' '.join(sys.argv) + '\n')
 
+    # load the table and klasses
     table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform)
 
+    # load the weights, if present
     if args.weights:
         sample_weights = assign_weights(args.weights, klasses)
     else:
         sample_weights = None
 
+    # shuffle the classes, if requested
     if args.shuffle:
         random.shuffle(klasses)
 
-    if args.rfc is None:
-        # prepare the arguments for the random forest instantiation
-        vargs = vars(args)
-        rfc_args = {k: vargs[k] for k in ['n_estimators', 'criterion', 'max_features', 'random_state', 'max_depth', 'oob_score', 'n_jobs', 'verbose']}
-
-        start_time = time.time()
-        rfc = create_rfc(table, klasses, sample_weights, **rfc_args)
-
-        if not args.shuffle:
-            save_results(rfc, tag)
-            print("saved results with tag {}".format(tag))
-
-        end_time = time.time()
-
-        if args.verbose > 0:
-            print("walltime elapsed: {:.1f} seconds".format(end_time - start_time))
-
-            if hasattr(rfc, 'oob_score_'):
-                print("oob score: {:.5f}".format(rfc.oob_score_))
-
-            print("top features:")
-            for i in range(10):
-                print("  {}\t{}".format(*rfc.ordered_features[i]))
-    else:
-        with open(args.rfc) as f:
-            rfc = pickle.load(f)
-
-        # run this rfc with the new table and classes
-        predicted_klasses = rfc.predict(table)
+    # CONSTRUCTION OF CLASSIFIER
+    if args.constructor == "load":
+        classifier = args.pickled_classifier
+        predicted_klasses = classifier.predict(table)
 
         for x in categorize_classifications(klasses, predicted_klasses):
             print(x)
 
-        print("score: {}".format(rfc.score(table, klasses)))
+    else:
+        # extract the kwargs for the classifier's construction
+        vargs = vars(args)
+        constructor_kwargs = {k: vargs[k] for k in args.constructor_kwarg_keys}
+
+        start_time = time.time()
+        classifier = create_classifier(args.constructor, table, klasses, constructor_kwargs, sample_weights)
+
+        if not args.shuffle:
+            save_results(classifier, tag)
+            print("saved results with tag {}".format(tag))
+
+        end_time = time.time()
+
+        if not args.quiet:
+            print("walltime elapsed: {:.1f} seconds".format(end_time - start_time))
+
+            if hasattr(classifier, 'oob_score_'):
+                print("oob score: {:.5f}".format(classifier.oob_score_))
+
+            print("top features:")
+            for i in range(10):
+                print("  {}\t{}".format(*classifier.ordered_features[i]))
