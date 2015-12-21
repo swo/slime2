@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 '''
     slime2 -- synthetic learning in microbial ecology
@@ -22,24 +22,18 @@
     swo@mit.edu
 '''
 
-import argparse, hashlib, sys, time, random, itertools
+import argparse, hashlib, sys, time, random, itertools, pickle
 import pandas as pd, numpy as np
 from sklearn.ensemble import RandomForestClassifier as RFC
-
-# import pickle with backwards compatibility
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
 
 def hash_tag(strs, tag_length=6):
     '''create a short tag using md5'''
 
     m = hashlib.md5()
-    m.update(''.join([s for s in strs]))
+    m.update((''.join([s for s in strs])).encode('utf-8'))
     return m.hexdigest()[0: tag_length]
 
-def parse_table_and_classes(table, klasses_fn):
+def parse_table_and_classes(table, klasses_fn, normalize=False, logt=None):
     '''
     read an OTU table and a file that specifies the classes for each sample.
 
@@ -78,6 +72,18 @@ def parse_table_and_classes(table, klasses_fn):
     # only keep samples in the OTU table if they have classes associated with them
     trim_table = raw_table.loc[list(samples)]
 
+    # remove OTUs that have all-zero counts
+    trim_table = trim_table.loc[:, (trim_table.sum(axis=0) != 0)]
+
+    # if doing a log transformation, add the pseudocounts and proceed
+    if logt is not None:
+        trim_table += logt
+        trim_table = np.log(trim_table)
+
+    # if normalizing, do that
+    if normalize:
+        trim_table = trim_table.apply(lambda col: col.astype(float) / np.sum(col), axis=0)
+
     return trim_table, klasses
 
 def parse_two_column_klasses(lines):
@@ -86,7 +92,7 @@ def parse_two_column_klasses(lines):
     for example, lines would be like sick_guy1 tab sick, healthy_guy1 tab healthy, etc.
     '''
 
-    samples, klasses = zip(*lines)
+    samples, klasses = zip(*[line.split('\t') for line in lines])
     return samples, klasses
 
 def parse_one_column_klasses(lines, comment="#"):
@@ -161,7 +167,7 @@ def save_results(rfc, tag):
     '''
 
     # pickle the whole rfc
-    with open(tagged_name('rfc', tag, suffix='pkl'), 'w') as f:
+    with open(tagged_name('rfc', tag, suffix='pkl'), 'wb') as f:
         pickle.dump(rfc, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # save the other information in text files
@@ -226,10 +232,14 @@ if __name__ == '__main__':
     g = p.add_argument_group('io')
     g.add_argument('otu_table')
     g.add_argument('classes', help='specifications of samples and their true classes')
-    g.add_argument('--output_tag', '-o', default=None, help='tag for output data (default: use a hash tag)')
+    g.add_argument('--tag', '-t', default=None, help='tag for output data (default: use a hash tag)')
     g.add_argument('--rfc', '-c', default=None, help='use an existing classifier?')
     g.add_argument('--shuffle', action='store_true', help='shuffle class labels?')
     g.add_argument('--weights', help='set of floats, comma separated')
+
+    g = p.add_argument_group('table preprocessing')
+    g.add_argument('--normalize', action='store_true', help='normalize table of counts to rel. abunds.?')
+    g.add_argument('--logtransform', default=None, type=int, help='log transform? if so, what pseudocount to add?')
 
     g = p.add_argument_group('tree details')
     g.add_argument('--n_estimators', '-n', default=10, type=int, help='number of trees')
@@ -239,17 +249,20 @@ if __name__ == '__main__':
     g.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
     g.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
     g.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
-    g.add_argument('--verbose', '-v', action='count', help="verbosity for the random forest creation and stdout summary")
+    g.add_argument('--verbose', '-v', default=0, action='count', help="verbosity for the random forest creation and stdout summary")
 
     args = p.parse_args()
 
-    tag = hash_tag([open(args.otu_table).read(), open(args.classes).read()])
+    if args.tag is None:
+        tag = hash_tag([open(args.otu_table).read(), open(args.classes).read()])
+    else:
+        tag = args.tag
 
     # save the command line
     with open(tagged_name('cmd', tag), 'w') as f:
         f.write(' '.join(sys.argv) + '\n')
 
-    table, klasses = parse_table_and_classes(args.otu_table, args.classes)
+    table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform)
 
     if args.weights:
         sample_weights = assign_weights(args.weights, klasses)
@@ -261,9 +274,8 @@ if __name__ == '__main__':
 
     if args.rfc is None:
         # prepare the arguments for the random forest instantiation
-        rfc_args = dict(vars(args))
-        for a in ['otu_table', 'classes', 'output_tag', 'rfc', 'shuffle', 'weights']:
-            del rfc_args[a]
+        vargs = vars(args)
+        rfc_args = {k: vargs[k] for k in ['n_estimators', 'criterion', 'max_features', 'random_state', 'max_depth', 'oob_score', 'n_jobs', 'verbose']}
 
         start_time = time.time()
         rfc = create_rfc(table, klasses, sample_weights, **rfc_args)
