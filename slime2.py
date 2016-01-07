@@ -33,12 +33,14 @@ def hash_tag(strs, tag_length=6):
     m.update((''.join([s for s in strs])).encode('utf-8'))
     return m.hexdigest()[0: tag_length]
 
-def parse_table_and_classes(table, klasses_fn, normalize=False, logt=None):
+def parse_table_and_classes(table, klasses_fn, normalize=False, logt=None, keep=False):
     '''
     read an OTU table and a file that specifies the classes for each sample.
 
     the table has qiime format (rows=otus, columns=samples).
     the classes file can take one of two formats: one-column or two-column.
+
+    keep : don't throw away columns that are not in the klasses file
 
     returns : (trimmed_table, classes)
         trimmed_table : pandas dataframe, with the samples without specified classes
@@ -69,11 +71,16 @@ def parse_table_and_classes(table, klasses_fn, normalize=False, logt=None):
     if len(missing_cols) > 0:
         raise RuntimeError("samples {} not a column in table, which has columns {}".format(missing_cols, cols))
 
-    # only keep samples in the OTU table if they have classes associated with them
-    trim_table = raw_table.loc[list(samples)]
+    if keep:
+        # figure out which rows/OTUs _would_ be removed if we were going to toss out samples
+        tmp_table = raw_table.loc[list(samples)]
+        trim_table = raw_table.loc[:, (tmp_table.sum(axis=0) != 0)]
+    if not keep:
+        # only keep samples in the OTU table if they have classes associated with them
+        trim_table = raw_table.loc[list(samples)]
 
-    # remove OTUs that have all-zero counts
-    trim_table = trim_table.loc[:, (trim_table.sum(axis=0) != 0)]
+        # remove OTUs that have all-zero counts
+        trim_table = trim_table.loc[:, (trim_table.sum(axis=0) != 0)]
 
     # if doing a log transformation, add the pseudocounts and proceed
     if logt is not None:
@@ -285,18 +292,18 @@ if __name__ == '__main__':
     with open(tagged_name('cmd', tag), 'w') as f:
         f.write(' '.join(sys.argv) + '\n')
 
-    # load the table and klasses
-    table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform)
-
     # CONSTRUCTION OF CLASSIFIER
     if args.constructor == "load":
+        table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=True)
         classifier = pickle.load(args.pickled_classifier)
         predicted_klasses = classifier.predict(table)
 
-        for x in categorize_classifications(klasses, predicted_klasses):
-            print(x)
+        for sample, klass in zip(table.index, predicted_klasses):
+            print(sample, klass, sep="\t")
 
     else:
+        table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=False)
+
         # load the weights, if present
         if args.weights:
             sample_weights = assign_weights(args.weights, klasses)
