@@ -270,7 +270,7 @@ if __name__ == '__main__':
 
     sp = subparsers.add_parser("load", help="load pickled classifier")
     sp.set_defaults(constructor="load")
-    sp.add_argument('pickled_classifier', type=argparse.FileType('r'))
+    sp.add_argument('pickled_classifier', type=argparse.FileType('rb'))
 
     args = p.parse_args()
 
@@ -288,25 +288,25 @@ if __name__ == '__main__':
     # load the table and klasses
     table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform)
 
-    # load the weights, if present
-    if args.weights:
-        sample_weights = assign_weights(args.weights, klasses)
-    else:
-        sample_weights = None
-
-    # shuffle the classes, if requested
-    if args.shuffle:
-        random.shuffle(klasses)
-
     # CONSTRUCTION OF CLASSIFIER
     if args.constructor == "load":
-        classifier = args.pickled_classifier
+        classifier = pickle.load(args.pickled_classifier)
         predicted_klasses = classifier.predict(table)
 
         for x in categorize_classifications(klasses, predicted_klasses):
             print(x)
 
     else:
+        # load the weights, if present
+        if args.weights:
+            sample_weights = assign_weights(args.weights, klasses)
+        else:
+            sample_weights = None
+
+        # shuffle the classes, if requested
+        if args.shuffle:
+            random.shuffle(klasses)
+
         # extract the kwargs for the classifier's construction
         vargs = vars(args)
         constructor_kwargs = {k: vargs[k] for k in args.constructor_kwarg_keys}
