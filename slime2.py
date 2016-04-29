@@ -254,7 +254,6 @@ if __name__ == '__main__':
     g.add_argument('--logtransform', default=None, type=int, help='log transform? if so, what pseudocount to add?')
 
     subparsers = p.add_subparsers(help="choose one classifier")
-    #subparsers.required = True
 
     sp = subparsers.add_parser("rf", help="random forest")
     sp.set_defaults(constructor=sklearn.ensemble.RandomForestClassifier)
@@ -265,7 +264,7 @@ if __name__ == '__main__':
     sp.add_argument('--random_state', '-r', type=int_or_none, default='none', help='random seed (none=random)')
     sp.add_argument('--max_depth', '-d', type=int_or_none, default='none', help='(none=no limit)')
     sp.add_argument('--no_oob_score', '-b', dest='oob_score', action='store_false')
-    sp.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of nodes')
+    sp.add_argument('--n_jobs', '-j', type=int, default=1, help='-1=# of cores')
     sp.add_argument('--verbose', '-v', action='count', default=0, help='verbose output')
 
     sp = subparsers.add_parser("ab", help="adaboost")
@@ -293,14 +292,15 @@ if __name__ == '__main__':
         f.write(' '.join(sys.argv) + '\n')
 
     # CONSTRUCTION OF CLASSIFIER
-    if args.constructor == "load":
+    if args.constructor is None:
+        raise RuntimeError('need to specify classifier on the command line')
+    elif args.constructor == "load":
         table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=True)
         classifier = pickle.load(args.pickled_classifier)
         predicted_klasses = classifier.predict(table)
 
         for sample, klass in zip(table.index, predicted_klasses):
             print(sample, klass, sep="\t")
-
     else:
         table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=False)
 
