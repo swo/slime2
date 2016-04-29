@@ -298,9 +298,10 @@ if __name__ == '__main__':
         table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=True)
         classifier = pickle.load(args.pickled_classifier)
         predicted_klasses = classifier.predict(table)
+        prediction_probabilities = classifier.predict_proba(table)
 
-        for sample, klass in zip(table.index, predicted_klasses):
-            print(sample, klass, sep="\t")
+        for sample, klass, prob in zip(table.index, predicted_klasses, prediction_probabilities):
+            print(sample, klass, *prob, sep="\t")
     else:
         table, klasses = parse_table_and_classes(args.otu_table, args.classes, normalize=args.normalize, logt=args.logtransform, keep=False)
 
